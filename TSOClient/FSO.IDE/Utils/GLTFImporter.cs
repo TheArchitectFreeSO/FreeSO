@@ -154,6 +154,7 @@ namespace FSO.IDE.Utils
                         bone.Children = bones.Where(x => x.ParentName == bone.Name).ToArray();
                     }
                     Skeleton.Bones = bones.ToArray();
+                    Skeleton.BuildBoneDictionary();
                     Skeleton.ComputeBonePositions(Skeleton.RootBone, Microsoft.Xna.Framework.Matrix.Identity);
                 }
             }
@@ -431,7 +432,7 @@ namespace FSO.IDE.Utils
                         
                         if (motion.HasRotation)
                         {
-                            motion.FirstRotationIndex = (uint)vitaRot.Count;
+                            motion.FirstRotationIndex = vitaRot.Count;
                             float rotDuration;
                             if (rotS.InterpolationMode == AnimationInterpolationMode.CUBICSPLINE)
                                 rotDuration = rotS.GetCubicKeys().LastOrDefault().Item1;
@@ -447,12 +448,12 @@ namespace FSO.IDE.Utils
                         }
                         else
                         {
-                            motion.FirstRotationIndex = uint.MaxValue;
+                            motion.FirstRotationIndex = -1;
                         }
 
                         if (motion.HasTranslation)
                         {
-                            motion.FirstTranslationIndex = (uint)vitaTrans.Count;
+                            motion.FirstTranslationIndex = vitaTrans.Count;
                             float transDuration;
                             if (transS.InterpolationMode == AnimationInterpolationMode.CUBICSPLINE)
                                 transDuration = transS.GetCubicKeys().LastOrDefault().Item1;
@@ -471,7 +472,7 @@ namespace FSO.IDE.Utils
                         }
                         else
                         {
-                            motion.FirstTranslationIndex = uint.MaxValue;
+                            motion.FirstTranslationIndex = -1;
                         }
                     }
                 }

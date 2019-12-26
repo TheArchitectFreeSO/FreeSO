@@ -109,6 +109,8 @@ namespace FSO.Server.Servers.Lot.Domain
             0x3161BB5B, //job controller
 
             0x475CC813, //water balloon controller
+            0x2D583771, //winter weather controller
+            0x7A78195C, //snowball controller
 
             0x5157DDF2, //cat carrier
             0x3278BD34, //dog carrier
@@ -125,6 +127,7 @@ namespace FSO.Server.Servers.Lot.Domain
             0x534564D5, //skill degrade
 
             0x699704D3, //fso vehicle controller
+            0x2D583771, //winter weather controller
         };
 
         private static HashSet<uint> InvalidGUIDs = new HashSet<uint>()
@@ -679,8 +682,9 @@ namespace FSO.Server.Servers.Lot.Domain
             Lot.TSOState.LotID = LotPersist.location;
             Lot.TSOState.SkillMode = LotPersist.skill_mode;
             Lot.TSOState.PropertyCategory = (byte)LotPersist.category;
+            var isCommunity = LotPersist.category == LotCategory.community;
 
-            if (LotPersist.category == LotCategory.community)
+            if (isCommunity)
             {
                 var owner = LotPersist.owner_id ?? 0;
                 if (Lot.TSOState.OwnerID != owner)
@@ -726,7 +730,9 @@ namespace FSO.Server.Servers.Lot.Domain
             ReturnInvalidObjects();
             if (!JobLot) ReturnOOWObjects();
 
-            if (isMoved || isNew) VMLotTerrainRestoreTools.RestoreTerrain(Lot);
+            var restoreType = isCommunity ? RestoreLotType.Community : RestoreLotType.Normal;
+            if (isMoved || isNew) VMLotTerrainRestoreTools.RestoreTerrain(Lot, restoreType);
+            VMLotTerrainRestoreTools.EnsureCoreObjects(Lot, restoreType);
             if (isNew) VMLotTerrainRestoreTools.PopulateBlankTerrain(Lot);
 
             Lot.ForwardCommand(new VMNetSetTimeCmd()
@@ -1126,7 +1132,7 @@ namespace FSO.Server.Servers.Lot.Domain
                 var avatar = da.Avatars.Get(session.AvatarId);
                 var rels = da.Relationships.GetOutgoing(session.AvatarId);
                 var jobinfo = da.Avatars.GetJobLevels(session.AvatarId);
-                var inventory = da.Objects.GetAvatarInventory(session.AvatarId);
+                var inventory = da.Objects.GetAvatarInventoryWithAttrs(session.AvatarId);
                 var myRoomieLots = da.Roommates.GetAvatarsLots(session.AvatarId); //might want to use other entries to update the roomies table entirely.
                 var myIgnored = da.Bookmarks.GetAvatarIgnore(session.AvatarId);
                 var user = da.Users.GetById(avatar.user_id);
@@ -1189,7 +1195,10 @@ namespace FSO.Server.Servers.Lot.Domain
                 Value = obj.value,
                 DynFlags1 = obj.dyn_flags_1,
                 DynFlags2 = obj.dyn_flags_2,
-                Graphic = obj.graphic
+                Graphic = obj.graphic,
+
+                AttributeMode = obj.has_db_attributes,
+                Attributes = obj.AugmentedAttributes ?? new List<int>()
             };
         }
         
