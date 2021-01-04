@@ -84,3 +84,5 @@ TSOClient/tso.client/GlobalSettings1.Designer.cs
 *.DS_Store
 TSOClient/.vs/config/applicationhost.config
 *.nvuser
+Other/libs/MSDFExtension/app.config
+Other/libs/MSDFExtension/MSDFExtension.csproj
