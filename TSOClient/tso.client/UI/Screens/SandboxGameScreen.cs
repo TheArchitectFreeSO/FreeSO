@@ -208,7 +208,7 @@ namespace FSO.Client.UI.Screens
                    tuning_type = "city",
                    tuning_index = 0,
                    tuning_table = 0,
-                   value = -1
+                   value = 2
                 }
             });
             Title.SetTitle(propertyName);
@@ -606,6 +606,7 @@ namespace FSO.Client.UI.Screens
                     var ents = vm.Entities.ToList();
                     foreach (var ent in ents)
                     {
+                        ent.SetFlag(VMEntityFlags.Occupied, false);
                         ent.ExecuteEntryPoint(2, vm.Context, true);
                     }
                 }

@@ -15,6 +15,7 @@ using FSO.Files.Formats.IFF.Chunks;
 using FSO.LotView.Model;
 using Microsoft.Xna.Framework;
 using FSO.Common.Utils;
+using FSO.LotView.Components.Model;
 
 namespace FSO.LotView.Components
 {
@@ -37,6 +38,7 @@ namespace FSO.LotView.Components
         public List<SLOTItem> ContainerSlots;
         public List<ParticleComponent> Particles = new List<ParticleComponent>();
         public _2DStandaloneSprite HeadlineSprite;
+        public MultitileObjectGroup MultitileGroup;
         public bool Dead;
         protected float ZOrder;
 
@@ -451,6 +453,11 @@ namespace FSO.LotView.Components
         public override Vector3 GetHeadlinePos()
         {
             return new Vector3(0, 0, -0.33f);
+        }
+
+        public override Vector3 GetLookTarget()
+        {
+            return new Vector3(Position.X, Position.Z + GetParticleBounds().Max.Y - 0.5f, Position.Y);
         }
 
         public override void Draw(GraphicsDevice device, WorldState world)

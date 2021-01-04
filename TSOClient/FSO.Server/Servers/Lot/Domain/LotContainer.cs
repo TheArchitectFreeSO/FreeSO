@@ -13,35 +13,28 @@ using FSO.Server.Database.DA.Objects;
 using FSO.Server.Database.DA.Relationships;
 using FSO.Server.Database.DA.Roommates;
 using FSO.Server.Database.DA.Users;
-using FSO.Server.Framework.Aries;
 using FSO.Server.Framework.Voltron;
 using FSO.Server.Protocol.Electron.Packets;
 using FSO.Server.Protocol.Gluon.Model;
 using FSO.Server.Servers.City.Domain;
 using FSO.SimAntics;
 using FSO.SimAntics.Engine;
-using FSO.SimAntics.Engine.TSOTransaction;
 using FSO.SimAntics.Marshals;
-using FSO.SimAntics.Marshals.Hollow;
 using FSO.SimAntics.Model;
 using FSO.SimAntics.Model.TSOPlatform;
-using FSO.SimAntics.NetPlay;
 using FSO.SimAntics.NetPlay.Drivers;
 using FSO.SimAntics.NetPlay.Model;
 using FSO.SimAntics.NetPlay.Model.Commands;
 using FSO.SimAntics.Utils;
 using Microsoft.Xna.Framework;
 using Ninject;
-using Ninject.Extensions.ChildKernel;
 using NLog;
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
-using System.Text;
 using System.Threading;
-using System.Threading.Tasks;
 
 namespace FSO.Server.Servers.Lot.Domain
 {
@@ -50,6 +43,10 @@ namespace FSO.Server.Servers.Lot.Domain
     /// </summary>
     public class LotContainer
     {
+        private const bool TIME_DILATION_ENABLED = true;
+        private const int TIME_DILATION_THRESHOLD_MS = 500; // Accelerate through half second pauses.
+        private const int TIME_DILATION_SKIP_THRESHOLD_MS = 5000; // 5 seconds, or 1 ingame minute
+
         private static Logger LOG = LogManager.GetCurrentClassLogger();
 
         private IDAFactory DAFactory;
@@ -111,6 +108,8 @@ namespace FSO.Server.Servers.Lot.Domain
             0x475CC813, //water balloon controller
             0x2D583771, //winter weather controller
             0x7A78195C, //snowball controller
+            0x33AD8F84, //face mask controller
+            0x04AB1D1F, //zombie spawner controller
 
             0x5157DDF2, //cat carrier
             0x3278BD34, //dog carrier
@@ -166,6 +165,15 @@ namespace FSO.Server.Servers.Lot.Domain
                 LotAdj = new List<DbLot>();
                 LotRoommates = new List<DbRoommate>();
                 Terrain = new VMTSOSurroundingTerrain();
+                Tuning = new DynamicTuning(new DynTuningEntry[] {
+                    new DynTuningEntry()
+                    {
+                        tuning_type = "feature",
+                        tuning_table = 0,
+                        tuning_index = 1,
+                        value = 1
+                    }
+                });
 
                 for (int y = 0; y < 3; y++)
                 {
@@ -646,7 +654,7 @@ namespace FSO.Server.Servers.Lot.Domain
             VMDriver.OnDirectMessage += DirectMessage;
             VMDriver.OnDropClient += DropClient;
 
-            if (JobLot) {
+            if (JobLot && Config.LogJobLots) {
                 var jobPacked = Context.DbId - 0x200;
                 var jobLevel = (short)((jobPacked - 1) & 0xF);
                 var jobType = (short)((jobPacked - 1) / 0xF);
@@ -720,9 +728,6 @@ namespace FSO.Server.Servers.Lot.Domain
 
             Lot.TSOState.ActivateValidator(Lot);
 
-            var time = DateTime.UtcNow;
-            var tsoTime = TSOTime.FromUTC(time);
-
             Lot.Context.UpdateTSOBuildableArea();
 
             Lot.MyUID = uint.MaxValue - 1;
@@ -735,13 +740,7 @@ namespace FSO.Server.Servers.Lot.Domain
             VMLotTerrainRestoreTools.EnsureCoreObjects(Lot, restoreType);
             if (isNew) VMLotTerrainRestoreTools.PopulateBlankTerrain(Lot);
 
-            Lot.ForwardCommand(new VMNetSetTimeCmd()
-            {
-                Hours = tsoTime.Item1,
-                Minutes = tsoTime.Item2,
-                Seconds = tsoTime.Item3,
-                UTCStart = DateTime.UtcNow.Ticks
-            });
+            ResyncTime();
 
             if (Lot.Tuning == null || (Lot.Tuning.GetTuning("forcedTuning", 0, 0) ?? 0f) == 0f)
             {
@@ -788,8 +787,11 @@ namespace FSO.Server.Servers.Lot.Domain
                         }
                         else
                         {
-                            ent.ResetData();
-                            ent.Init(Lot.Context); //objects should not be occupied when we join the lot...
+                            if (ent.Object.OBJ.GUID != 0x30A76C84 && ent.Object.OBJ.GUID != 0x130B5C88) //ignore these two for now
+                            {
+                                ent.ResetData();
+                                ent.Init(Lot.Context); //objects should not be occupied when we join the lot...
+                            }
                         }
                     }
                     {
@@ -816,7 +818,7 @@ namespace FSO.Server.Servers.Lot.Domain
         public void UpdateTuning(IEnumerable<DynTuningEntry> tuning)
         {
             Tuning = new DynamicTuning(tuning);
-            if (Lot == null) return;
+            if (Lot == null || JobLot) return;
             if (Lot.Tuning == null || (Lot.Tuning.GetTuning("forcedTuning", 0, 0) ?? 0f) == 0f)
             {
                 Lot.ForwardCommand(new VMNetTuningCmd()
@@ -824,6 +826,20 @@ namespace FSO.Server.Servers.Lot.Domain
                     Tuning = Tuning
                 });
             }
+        }
+
+        private void ResyncTime()
+        {
+            var time = DateTime.UtcNow;
+            var tsoTime = TSOTime.FromUTC(time);
+
+            Lot.ForwardCommand(new VMNetSetTimeCmd()
+            {
+                Hours = tsoTime.Item1,
+                Minutes = tsoTime.Item2,
+                Seconds = tsoTime.Item3,
+                UTCStart = DateTime.UtcNow.Ticks
+            });
         }
 
         private static uint PAYPHONE_GUID = 0x313D2F9A;
@@ -931,6 +947,7 @@ namespace FSO.Server.Servers.Lot.Domain
                 var timeKeeper = new Stopwatch(); //todo: smarter timing
                 timeKeeper.Start();
                 long lastTick = 0;
+                long skippedTimeMs = 0;
 
                 LotSaveTicker = LOT_SAVE_PERIOD;
                 AvatarSaveTicker = AVATAR_SAVE_PERIOD;
@@ -956,6 +973,7 @@ namespace FSO.Server.Servers.Lot.Domain
                         DereferenceLot();
                         return;
                     }
+
                     if (Lot.Aborting)
                     {
                         DereferenceLot();
@@ -1074,7 +1092,31 @@ namespace FSO.Server.Servers.Lot.Domain
                         KeepAliveTicker = KEEP_ALIVE_PERIOD;
                     }
 
-                    Thread.Sleep((int)Math.Max(0, (((lastTick + 1) * 1000) / TICKRATE) - timeKeeper.ElapsedMilliseconds));
+                    long currentTickMs = ((lastTick + 1) * 1000) / TICKRATE;
+                    long targetTickMs = timeKeeper.ElapsedMilliseconds;
+
+                    long sleepTime = currentTickMs - targetTickMs;
+
+                    if (sleepTime > 0)
+                    {
+                        Thread.Sleep((int)Math.Max(0, sleepTime));
+                    }
+                    else
+                    {
+                        if (-sleepTime > TIME_DILATION_THRESHOLD_MS && TIME_DILATION_ENABLED)
+                        {
+                            // skip forward in time
+                            long skipTime = ((-sleepTime) * TICKRATE) / 1000;
+                            lastTick += skipTime;
+                            skippedTimeMs -= sleepTime;
+
+                            if (skippedTimeMs > TIME_DILATION_SKIP_THRESHOLD_MS)
+                            {
+                                ResyncTime();
+                                skippedTimeMs = 0;
+                            }
+                        }
+                    }
                 }
             }
             catch (Exception e)
